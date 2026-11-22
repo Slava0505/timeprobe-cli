@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add English CLI and time-tracking skills, including first-use app setup.
+- Replace the technical README with a short product guide and a desktop concept preview.
+
 - Center visible pixel glyphs vertically and horizontally.
 - Allow dragging the overlay without accidentally pausing the session.
 - Launch workers through pythonw with hidden-window flags.
