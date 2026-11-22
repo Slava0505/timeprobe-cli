@@ -32,12 +32,13 @@ You'll need Windows, Python 3.10 or later, and Git.
 
 ## Why two skills?
 
-| Skill | What it teaches the agent |
+| Skill | What it's for |
 | --- | --- |
-| [timeprobe-cli](skills/timeprobe-cli/SKILL.md) | Install the app, run its commands, and read its responses. |
-| [time-tracking](skills/time-tracking/SKILL.md) | Use timeprobe for timing requests, respect manual pauses, record actual time, and close the session. |
+| [timeprobe-cli](skills/timeprobe-cli/SKILL.md) | How to operate the stopwatch: setup, commands, and responses. |
+| [time-tracking](skills/time-tracking/SKILL.md) | How **you** want the agent to use it in your work: when to start, what to record, and when to finish. |
 
-The command reference stays separate from the rules for tracking an activity.
+The CLI skill covers the controls; time-tracking defines your workflow.
+You can and should edit time-tracking to fit how you work.
 
 Try: “Start a 30-minute session.” Later: “I'm done. Record the time.”
 
