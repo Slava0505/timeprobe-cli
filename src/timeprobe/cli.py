@@ -53,6 +53,10 @@ def render(result: dict[str, Any]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if sys.platform != "win32":
+        error = {"ok": False, "error": {"code": "unsupported_platform", "message": "Windows only."}}
+        print(json.dumps(error) if "--json" in arguments else "Windows only.")
+        return 1
     if len(arguments) == 2 and arguments[0] == "_worker":
         engine.worker(store.state_dir(), arguments[1])
         return 0

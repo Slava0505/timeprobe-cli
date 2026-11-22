@@ -13,7 +13,8 @@ from timeprobe import store
 
 
 @pytest.fixture
-def cli(tmp_path):
+def cli(tmp_path, monkeypatch):
+    monkeypatch.setenv("TIMEPROBE_WIDGET", "0")
     environment = {**os.environ, "TIMEPROBE_STATE_DIR": str(tmp_path)}
 
     def invoke(*arguments, code=0):

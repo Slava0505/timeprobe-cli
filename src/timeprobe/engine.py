@@ -32,18 +32,13 @@ def maintain(data: dict[str, Any]) -> None:
 
 
 def spawn(directory: Path, session_id: str) -> int:
-    options: dict[str, Any] = {}
-    if sys.platform == "win32":
-        options["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-    else:
-        options["start_new_session"] = True
     process = subprocess.Popen(
         [sys.executable, "-m", "timeprobe", "_worker", session_id],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         env={**os.environ, "TIMEPROBE_STATE_DIR": str(directory)},
-        **options,
+        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
     )
     pid = process.pid
     # This CLI intentionally exits before its detached child. No wait is intended.
@@ -129,5 +124,17 @@ def step(directory: Path, session_id: str) -> bool:
 
 
 def worker(directory: Path, session_id: str) -> None:
+    if sys.platform == "win32" and os.environ.get("TIMEPROBE_WIDGET") != "0":
+        try:
+            from timeprobe.win32_overlay import run
+
+            run(directory, session_id)
+            return
+        except Exception as error:
+            # A display failure must not discard the underlying measurement.
+            with store.locked(directory) as data:
+                current = data["current"]
+                if current and current["id"] == session_id:
+                    current.update(widget_state="failed", widget_error=str(error))
     while step(directory, session_id):
         time.sleep(0.1)

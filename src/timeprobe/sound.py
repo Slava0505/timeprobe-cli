@@ -4,13 +4,8 @@ from __future__ import annotations
 
 import io
 import math
-import shutil
 import struct
-import subprocess
-import sys
-import tempfile
 import wave
-from pathlib import Path
 
 
 def chime_bytes() -> bytes:
@@ -32,17 +27,7 @@ def chime_bytes() -> bytes:
 
 
 def play() -> None:
-    audio = chime_bytes()
-    if sys.platform == "win32":
-        import winsound
+    import winsound
 
-        winsound.PlaySound(audio, winsound.SND_MEMORY | winsound.SND_NODEFAULT)
-        return
-    player = shutil.which("afplay" if sys.platform == "darwin" else "paplay")
-    player = player or shutil.which("aplay")
-    if not player:
-        raise OSError("no WAV audio player available")
-    with tempfile.TemporaryDirectory(prefix="timeprobe-") as directory:
-        path = Path(directory) / "chime.wav"
-        path.write_bytes(audio)
-        subprocess.run([player, str(path)], check=True, capture_output=True, timeout=10)
+    audio = chime_bytes()
+    winsound.PlaySound(audio, winsound.SND_MEMORY | winsound.SND_NODEFAULT)

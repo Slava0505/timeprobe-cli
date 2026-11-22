@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>timeprobe — цифры поверх экрана</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600&family=Quicksand:wght@500&family=Rajdhani:wght@500&family=Tiny5&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f5f1;color:#292d29;font-family:Manrope,"Segoe UI",sans-serif}button{font:inherit;cursor:pointer}button:focus-visible{outline:3px solid #6b9cc5;outline-offset:4px}header,main,footer{max-width:1220px;margin:auto;padding-inline:30px}header{padding-top:30px}.brand{font-size:14px;letter-spacing:-.3px;font-weight:600}.edition{color:#81867d;font-size:11px;margin-left:10px;font-weight:400}h1{font-size:30px;letter-spacing:-1px;font-weight:500;margin:28px 0 10px}.intro{font-size:13px;line-height:1.8;color:#777d73;margin:0}.controls{display:flex;flex-wrap:wrap;gap:14px 25px;align-items:center;padding:22px 0;margin-top:20px;border-top:1px solid #dedfd7}.group{display:flex;gap:4px;align-items:center;flex-wrap:wrap}.label{font-size:11px;color:#7a8075;margin-right:8px}.group button,.animate{padding:9px 12px;border:1px solid transparent;background:transparent;color:#74796f;border-radius:5px;font-size:12px;min-height:36px}.group button[aria-pressed="true"]{border-color:#cdd1c5;background:#fff;color:#252c23}.animate{border-color:#d4d7cc;margin-left:auto}.animate[aria-pressed="true"]{background:#e0e7da;color:#35462f}.gallery{display:grid;grid-template-columns:1fr 1fr;gap:28px 24px;padding-top:4px}.study{min-width:0}.study-head{display:flex;gap:10px;align-items:baseline;margin:0 0 10px}.index{font-family:"IBM Plex Mono",monospace;color:#979d91;font-size:10px}.study h2{font-size:14px;font-weight:500;margin:0}.font-label{margin-left:auto;color:#82887b;font-size:10px}.desktop{height:320px;position:relative;overflow:hidden;border:1px solid #d9dcd2;border-radius:7px;background:#fcfcfa;color:#6c7269;isolation:isolate;--screen-lines:#e2e5dd;--screen-head:#d0d6c9}.appbar{height:29px;background:#efefeb;border-bottom:1px solid #e2e4dc;display:flex;align-items:center;justify-content:space-between;padding-left:12px;font-size:9px;color:#8a8f83}.window-controls{height:28px;display:flex;align-items:center}.window-controls span{display:flex;align-items:center;justify-content:center;height:100%;width:30px;font-size:13px;color:#747c6c}.window-controls .close{font-size:17px}.app-content{display:grid;grid-template-columns:92px 1fr;height:calc(100% - 29px)}.sidebar{background:#f5f6f1;border-right:1px solid #e8eae2;padding:22px 14px}.sidebar i{display:block;height:4px;width:48px;background:#dfe3d7;border-radius:2px;margin-bottom:17px}.sidebar i:first-child{background:#aab79e;width:58px}.document{padding:29px 25px;position:relative}.document .doc-title{font-size:12px;letter-spacing:-.2px;margin-bottom:15px;color:#6f7866}.doc-line{height:4px;margin:11px 0;background:var(--screen-lines);border-radius:2px}.doc-line.title{background:var(--screen-head);height:6px;width:34%;margin-bottom:23px}.doc-line.short{width:72%}.doc-line.shorter{width:47%}.doc-line.gap{margin-top:27px}.desktop-caption{position:absolute;bottom:12px;left:12px;font-size:8px;letter-spacing:.5px;color:#a5ad9c}.widget{position:absolute;right:9px;top:44px;min-width:148px;width:148px;height:60px;padding:0 13px;display:flex;align-items:center;justify-content:center;border:1px solid #ffffff21;border-radius:6px;background:rgba(22,27,32,.73);color:#f5f6f0;box-shadow:0 3px 12px #00000012;backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);transition:width .18s ease,min-width .18s ease;user-select:none}.widget.hours{min-width:201px;width:201px}.value{font-size:34px;line-height:1;letter-spacing:-1.6px;white-space:nowrap;font-variant-numeric:tabular-nums;transition:opacity .12s}.widget.air .value{font-family:Manrope,"Segoe UI",sans-serif;font-weight:400}.widget.mono{background:rgba(20,29,29,.74);color:#e0eee5}.widget.mono .value{font-family:"IBM Plex Mono",Consolas,monospace;font-weight:400;font-size:31px;letter-spacing:-1.3px}.widget.round{background:rgba(34,32,34,.72);color:#f0e6dc}.widget.round .value{font-family:Quicksand,"Segoe UI",sans-serif;font-weight:500;font-size:35px;letter-spacing:-1.3px}.widget.narrow{background:rgba(21,29,37,.76);color:#e4edf5}.widget.narrow .value{font-family:Rajdhani,"Arial Narrow",sans-serif;font-size:40px;font-weight:500;letter-spacing:.4px}.widget.pixel{background:rgba(22,29,25,.76);color:#d8e6c9}.widget.pixel .value{font-family:Tiny5,"Courier New",monospace;font-size:39px;letter-spacing:0}.pause{position:absolute;inset:0;width:100%;height:100%;border:0;border-radius:inherit;display:flex;align-items:center;justify-content:center;background:transparent;color:inherit;opacity:0;transition:opacity .12s}.pause-icon{display:flex;gap:5px;filter:drop-shadow(0 1px 3px #0006)}.pause-icon:before,.pause-icon:after{content:"";width:3px;height:17px;background:currentColor;border-radius:1px}.widget:hover .value,.widget:focus-within .value{opacity:.16}.widget:hover .pause,.widget:focus-within .pause{opacity:1}.widget.paused .pause-icon{width:0;height:0;border-left:12px solid currentColor;border-top:8px solid transparent;border-bottom:8px solid transparent;display:block}.widget.paused .pause-icon:before,.widget.paused .pause-icon:after{display:none}.widget.paused .value{opacity:.65}.widget.paused:hover .value,.widget.paused:focus-within .value{opacity:.16}.study p{font-size:11px;color:#858b7d;line-height:1.7;margin:10px 0 0}.study:last-child{grid-column:1/-1}.study:last-child .desktop{height:330px}.study:last-child .document{max-width:none}.dark-screen .desktop{background:#171b1e;border-color:#363c3c;color:#b2bbb5;--screen-lines:#30383a;--screen-head:#46504b}.dark-screen .appbar{background:#202629;border-color:#303637;color:#84918b}.dark-screen .window-controls span{color:#a6b3ac}.dark-screen .sidebar{background:#1c2225;border-color:#293033}.dark-screen .sidebar i{background:#343e3b}.dark-screen .sidebar i:first-child{background:#5c6f59}.dark-screen .document .doc-title{color:#a5b2a5}.dark-screen .desktop-caption{color:#58675e}footer{font-size:11px;color:#868d7e;line-height:1.8;padding-block:28px;margin-top:24px;border-top:1px solid #dfe2d7}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+@media(max-width:800px){.gallery{grid-template-columns:1fr}.study:last-child{grid-column:auto}.desktop,.study:last-child .desktop{height:330px}}@media(max-width:450px){header,main,footer{padding-inline:16px}h1{font-size:25px}.edition{font-size:9px}.font-label{font-size:9px}.label{width:100%;margin-bottom:3px}.controls{gap:12px}.animate{margin-left:0}.group button{padding:8px 9px}.app-content{grid-template-columns:55px 1fr}.sidebar{padding-inline:9px}.sidebar i{max-width:30px}.sidebar i:first-child{max-width:35px}.document{padding:29px 15px}.widget{right:8px}.desktop{height:300px}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+/* Compact pixel variant; keep its existing palette and opacity unchanged. */
+.widget.pixel{min-width:124px;width:124px;height:48px;padding-inline:8px}
+.widget.pixel.hours{min-width:168px;width:168px}
+.widget.pixel .value{font-size:36px}
+</style>
+</head>
+<body>
+<header>
+<div class="brand">timeprobe<span class="edition">ЦИФРЫ ПОВЕРХ ЭКРАНА</span></div>
+<h1>Шрифт и цвет</h1>
+<p class="intro">Во всех вариантах — полупрозрачный прямоугольник справа, ниже кнопки закрытия.<br>Наведи на цифры: появится пауза. Нажми — замер остановится; повторное нажатие продолжит его.</p>
+<div class="controls">
+  <div class="group" role="group" aria-label="Фон экрана"><span class="label">Экран</span><button data-theme="light" aria-pressed="true">Белый</button><button data-theme="dark" aria-pressed="false">Тёмный</button></div>
+  <div class="group" role="group" aria-label="Пример времени"><span class="label">Время</span><button data-value="1057" aria-pressed="true">17:37</button><button data-value="7" aria-pressed="false">00:07</button><button data-value="-143" aria-pressed="false">+02:23</button><button data-value="4657" aria-pressed="false">1:17:37</button></div>
+  <button class="animate" id="animate" aria-pressed="false">Запустить демо</button>
+</div>
+</header>
+<main><div class="gallery" id="gallery"></div><p class="sr-only" aria-live="polite" id="notice"></p></main>
+<footer>Эскизы оформления. К CLI не подключены. Ширина сохраняется при 00:07 и увеличивается при появлении часов.</footer>
+<script>
+(() => {
+  const styles = [
+    {name:'Воздух',className:'air',font:'Manrope · белый',note:'Нейтральные тонкие цифры. Самый близкий к предыдущему «Воздуху».'},
+    {name:'Моно',className:'mono',font:'IBM Plex Mono · мятный',note:'Ровные моноширинные цифры, чуть прохладный оттенок.'},
+    {name:'Мягкий',className:'round',font:'Quicksand · тёплый',note:'Округлые цифры без засечек, тёплый светлый оттенок.'},
+    {name:'Узкий',className:'narrow',font:'Rajdhani · ледяной',note:'Вытянутые цифры, лёгкое ощущение цифрового прибора.'},
+    {name:'Пиксель',className:'pixel',font:'Tiny5 · шалфей',note:'Только пиксельные цифры; форма и прозрачность остаются такими же.'}
+  ];
+  const gallery = document.getElementById('gallery');
+  let time = 1057;
+  let running = false;
+  let lastTick = performance.now();
+  const widgets = [];
+  function format(seconds) {
+    const absolute = Math.max(0,Math.ceil(Math.abs(seconds)));
+    const h = Math.floor(absolute/3600);
+    const m = Math.floor(absolute%3600/60);
+    const s = absolute%60;
+    return `${seconds<0?'+':''}${h?h+':':''}${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
+  styles.forEach((style,index) => {
+    const section = document.createElement('section');
+    section.className='study';
+    section.innerHTML=`<div class="study-head"><span class="index">0${index+1}</span><h2>${style.name}</h2><span class="font-label">${style.font}</span></div><div class="desktop"><div class="appbar"><span>Документ</span><div class="window-controls" aria-hidden="true"><span>−</span><span>□</span><span class="close">×</span></div></div><div class="app-content" aria-hidden="true"><div class="sidebar"><i></i><i></i><i></i><i></i><i></i></div><div class="document"><div class="doc-title">Рабочее пространство</div><div class="doc-line title"></div><div class="doc-line"></div><div class="doc-line"></div><div class="doc-line short"></div><div class="doc-line gap"></div><div class="doc-line"></div><div class="doc-line shorter"></div><div class="doc-line gap"></div><div class="doc-line short"></div><div class="doc-line"></div></div></div><span class="desktop-caption">МАКЕТ ЭКРАНА</span><div class="widget ${style.className}"><span class="value" aria-hidden="true">17:37</span><button class="pause" aria-label="Пауза: ${style.name}" aria-pressed="false"><span class="pause-icon" aria-hidden="true"></span></button></div></div><p>${style.note}</p>`;
+    gallery.append(section);
+    const widget=section.querySelector('.widget');
+    const entry={widget,value:1057,paused:false};
+    widgets.push(entry);
+    widget.querySelector('button').addEventListener('click',() => {
+      entry.paused=!entry.paused;
+      widget.classList.toggle('paused',entry.paused);
+      const button=widget.querySelector('button');
+      button.setAttribute('aria-pressed',String(entry.paused));
+      button.setAttribute('aria-label',`${entry.paused?'Продолжить':'Пауза'}: ${style.name}`);
+      document.getElementById('notice').textContent=`${style.name}: ${entry.paused?'пауза':'продолжение'}`;
+    });
+  });
+  function draw(){
+    widgets.forEach(entry=>{
+      const value=format(entry.value);
+      entry.widget.querySelector('.value').textContent=value;
+      entry.widget.classList.toggle('hours',Math.abs(entry.value)>=3600);
+      entry.widget.setAttribute('aria-label',`${value}${entry.paused?', пауза':''}`);
+    });
+  }
+  document.querySelectorAll('[data-theme]').forEach(button=>button.addEventListener('click',()=>{
+    document.body.classList.toggle('dark-screen',button.dataset.theme==='dark');
+    document.querySelectorAll('[data-theme]').forEach(other=>other.setAttribute('aria-pressed',String(other===button)));
+  }));
+  document.querySelectorAll('[data-value]').forEach(button=>button.addEventListener('click',()=>{
+    time=Number(button.dataset.value);
+    widgets.forEach(entry=>{entry.value=time;});
+    document.querySelectorAll('[data-value]').forEach(other=>other.setAttribute('aria-pressed',String(other===button)));
+    lastTick=performance.now();draw();
+  }));
+  document.getElementById('animate').addEventListener('click',event=>{
+    running=!running;lastTick=performance.now();
+    event.currentTarget.setAttribute('aria-pressed',String(running));
+    event.currentTarget.textContent=running?'Заморозить демо':'Запустить демо';
+  });
+  setInterval(()=>{
+    const now=performance.now();
+    if(running){widgets.forEach(entry=>{if(!entry.paused)entry.value-=(now-lastTick)/1000;});draw();}
+    lastTick=now;
+  },200);
+  draw();
+})();
+</script>
+</body>
+</html>

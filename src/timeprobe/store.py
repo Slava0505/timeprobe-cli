@@ -6,7 +6,6 @@ import contextlib
 import ctypes
 import json
 import os
-import sys
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -17,39 +16,33 @@ def state_dir() -> Path:
     override = os.environ.get("TIMEPROBE_STATE_DIR")
     if override:
         return Path(override).expanduser().resolve()
-    if sys.platform == "win32":
-        return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "timeprobe"
-    return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "timeprobe"
+    return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "timeprobe"
 
 
 def alive(pid: int | None) -> bool:
     if not pid:
         return False
-    if sys.platform == "win32":
-        from ctypes import wintypes
+    from ctypes import wintypes
 
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-        kernel.OpenProcess.restype = wintypes.HANDLE
-        kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-        handle = kernel.OpenProcess(0x1000, False, pid)
-        if not handle:
-            return False
-        try:
-            code = wintypes.DWORD()
-            return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259
-        finally:
-            kernel.CloseHandle(handle)
-    try:
-        os.kill(pid, 0)
-    except OSError:
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.OpenProcess(0x1000, False, pid)
+    if not handle:
         return False
-    return True
+    try:
+        code = wintypes.DWORD()
+        return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259
+    finally:
+        kernel.CloseHandle(handle)
 
 
 @contextlib.contextmanager
 def locked(directory: Path) -> Iterator[dict[str, Any]]:
+    import msvcrt
+
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / "state.lock").open("a+b") as lock:
         lock.seek(0, os.SEEK_END)
@@ -57,14 +50,7 @@ def locked(directory: Path) -> Iterator[dict[str, Any]]:
             lock.write(b"\0")
             lock.flush()
         lock.seek(0)
-        if sys.platform == "win32":
-            import msvcrt
-
-            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
         try:
             path = directory / "state.json"
             data = (
@@ -83,7 +69,4 @@ def locked(directory: Path) -> Iterator[dict[str, Any]]:
                 Path(temporary).unlink(missing_ok=True)
         finally:
             lock.seek(0)
-            if sys.platform == "win32":
-                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)

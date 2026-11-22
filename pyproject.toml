@@ -11,6 +11,7 @@ license = { file = "LICENSE" }
 requires-python = ">=3.10"
 dependencies = []
 keywords = ["stopwatch", "cli", "time-tracking"]
+classifiers = ["Operating System :: Microsoft :: Windows"]
 
 [project.scripts]
 timeprobe = "timeprobe.cli:main"
