@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Center visible pixel glyphs vertically and horizontally.
+- Allow dragging the overlay without accidentally pausing the session.
+- Launch workers through pythonw with hidden-window flags.
+
 - Add an automatic translucent Tiny5 desktop overlay with hover pause/resume.
 - Keep digits opaque, support countdown/overtime, and expand for hours without shrinking.
 - Bundle Tiny5 and its OFL notice for offline rendering.

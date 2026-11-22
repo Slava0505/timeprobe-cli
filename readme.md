@@ -50,8 +50,13 @@ with a plus sign. The normal size is 124 by 48 logical pixels. It expands for ho
 and keeps that width until the session ends. Windows display scaling is respected.
 
 Hover to reveal pause; click to pause. Hover again and click the play icon to
-resume. The same session is controlled by the CLI and the widget. The widget does
+resume. Drag anywhere on the widget to move it; a drag does not toggle pause.
+The position is retained for the current session. Visible digits are centered by
+their actual pixel bounds rather than the font's line metrics.
+The same session is controlled by the CLI and the widget. The widget does
 not take keyboard focus. `stop` saves the result and closes the widget.
+Its worker uses `pythonw.exe` when available and hidden process flags, without
+opening a console window.
 
 For automation without a desktop widget, set `TIMEPROBE_WIDGET=0` before starting.
 If the widget cannot open, the session continues; `status --json` reports

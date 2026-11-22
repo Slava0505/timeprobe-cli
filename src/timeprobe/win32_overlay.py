@@ -10,7 +10,7 @@ from pathlib import Path
 
 from timeprobe import engine, store
 from timeprobe.model import snapshot
-from timeprobe.overlay import display_time
+from timeprobe.overlay import center_ink, display_time
 
 LRESULT = c.c_ssize_t
 WNDPROC = c.WINFUNCTYPE(LRESULT, w.HWND, w.UINT, w.WPARAM, w.LPARAM)
@@ -89,6 +89,11 @@ class Overlay:
         self.wide = False
         self.previous = None
         self.failure = None
+        self.position = None
+        self.last_width = None
+        self.pointer_start = None
+        self.drag_origin = None
+        self.dragging = False
         self.callback = WNDPROC(self.procedure)
         self.class_name = f"timeprobe-{session_id}"
 
@@ -123,6 +128,12 @@ class Overlay:
         self.translate = api(u, "TranslateMessage", w.BOOL, c.POINTER(w.MSG))
         self.dispatch = api(u, "DispatchMessageW", LRESULT, c.POINTER(w.MSG))
         self.track = api(u, "TrackMouseEvent", w.BOOL, c.POINTER(MouseTracking))
+        self.cursor_position = api(u, "GetCursorPos", w.BOOL, c.POINTER(w.POINT))
+        self.capture = api(u, "SetCapture", w.HWND, w.HWND)
+        self.release_capture = api(u, "ReleaseCapture", w.BOOL)
+        self.move = api(
+            u, "SetWindowPos", w.BOOL, w.HWND, w.HWND, c.c_int, c.c_int, c.c_int, c.c_int, w.UINT
+        )
         self.work_area = api(u, "SystemParametersInfoW", w.BOOL, w.UINT, w.UINT, ptr, w.UINT)
         self.load_cursor = api(u, "LoadCursorW", w.HANDLE, w.HINSTANCE, ptr)
         self.layer = api(
@@ -249,6 +260,17 @@ class Overlay:
                     self.destroy(window)
                 return 0
             if message == 0x200:  # WM_MOUSEMOVE
+                if self.pointer_start is not None:
+                    point = w.POINT()
+                    self.cursor_position(c.byref(point))
+                    dx, dy = point.x - self.pointer_start[0], point.y - self.pointer_start[1]
+                    if self.dragging or max(abs(dx), abs(dy)) >= round(4 * self.scale):
+                        self.dragging = True
+                        self.hovered = False
+                        self.position = self.drag_origin[0] + dx, self.drag_origin[1] + dy
+                        self.move(window, w.HWND(-1), *self.position, 0, 0, 0x0011)
+                        self.refresh()
+                        return 0
                 if not self.hovered:
                     self.hovered = True
                     self.track(c.byref(MouseTracking(c.sizeof(MouseTracking), 2, window, 0)))
@@ -258,7 +280,23 @@ class Overlay:
                 self.hovered = False
                 self.refresh()
                 return 0
+            if message == 0x201:  # WM_LBUTTONDOWN
+                point = w.POINT()
+                self.cursor_position(c.byref(point))
+                self.pointer_start = point.x, point.y
+                self.drag_origin = self.position
+                self.dragging = False
+                self.capture(window)
+                return 0
             if message == 0x202:  # WM_LBUTTONUP
+                dragged = self.dragging
+                self.pointer_start = None
+                self.dragging = False
+                self.release_capture()
+                if dragged:
+                    self.hovered = True
+                    self.refresh()
+                    return 0
                 with store.locked(self.directory) as data:
                     current = data["current"]
                     if not current or current["id"] != self.session_id:
@@ -266,6 +304,10 @@ class Overlay:
                     action = "resume" if current["state"] == "paused" else "pause"
                 engine.execute(action, self.directory)
                 self.refresh()
+                return 0
+            if message == 0x215:  # WM_CAPTURECHANGED
+                self.pointer_start = None
+                self.dragging = False
                 return 0
             if message == 2:  # WM_DESTROY
                 self.user.PostQuitMessage(0)
@@ -301,7 +343,12 @@ class Overlay:
         area = w.RECT()
         if not self.work_area(0x30, 0, c.byref(area), 0):
             raise c.WinError(c.get_last_error())
-        destination = w.POINT(area.right - width - round(9 * scale), area.top + round(44 * scale))
+        if self.position is None:
+            self.position = area.right - width - round(9 * scale), area.top + round(44 * scale)
+        elif self.last_width is not None and self.last_width != width:
+            self.position = self.position[0] + self.last_width - width, self.position[1]
+        self.last_width = width
+        destination = w.POINT(*self.position)
         dc = self.create_dc(None)
         bitmap = None
         previous = None
@@ -322,6 +369,7 @@ class Overlay:
             self.draw_text(dc, text, -1, c.byref(w.RECT(0, 0, width, height)), 0x25)
             self.gdi.GdiFlush()
             pixels = (c.c_ubyte * (width * height * 4)).from_address(address.value)
+            mask = center_ink(bytes(pixels[::4]), width, height)
             # Composite opaque sage digits over the exact approved translucent background.
             foreground = (216, 230, 201)
             background = (22, 29, 25)
@@ -335,7 +383,9 @@ class Overlay:
                     )
                     coverage = max(0.0, min(1.0, radius + 0.5 - distance))
                     text_alpha = (
-                        pixels[offset] / 255 * (0.16 if self.hovered else 0.65 if paused else 1)
+                        mask[y * width + x]
+                        / 255
+                        * (0.16 if self.hovered else 0.65 if paused else 1)
                     )
                     if self.hovered:
                         px, py = (x - width / 2) / scale, (y - height / 2) / scale

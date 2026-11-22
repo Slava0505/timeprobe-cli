@@ -32,13 +32,19 @@ def maintain(data: dict[str, Any]) -> None:
 
 
 def spawn(directory: Path, session_id: str) -> int:
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    interpreter = str(pythonw) if pythonw.exists() else sys.executable
+    startup = subprocess.STARTUPINFO()
+    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = subprocess.SW_HIDE
     process = subprocess.Popen(
-        [sys.executable, "-m", "timeprobe", "_worker", session_id],
+        [interpreter, "-m", "timeprobe", "_worker", session_id],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         env={**os.environ, "TIMEPROBE_STATE_DIR": str(directory)},
-        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+        creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
+        startupinfo=startup,
     )
     pid = process.pid
     # This CLI intentionally exits before its detached child. No wait is intended.

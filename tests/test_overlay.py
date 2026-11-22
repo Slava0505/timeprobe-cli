@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from timeprobe.overlay import display_time
+from timeprobe.overlay import center_ink, display_time
 
 
 @pytest.mark.parametrize(
@@ -27,3 +27,17 @@ def test_hours_layout_does_not_shrink_at_hour_boundary():
     assert display_time(initial) == ("1:00:01", True)
     later = {"elapsed_seconds": 2, "target_seconds": 3601}
     assert display_time(later, keep_hours=True) == ("0:59:59", True)
+
+
+def test_visible_ink_is_centered_instead_of_font_line_box():
+    mask = bytearray(10 * 10)
+    for y in (6, 7):
+        for x in (1, 2, 3, 4):
+            mask[y * 10 + x] = 255
+    centered = center_ink(bytes(mask), 10, 10)
+    points = [(i % 10, i // 10) for i, value in enumerate(centered) if value]
+    assert min(x for x, _ in points) == 3
+    assert max(x for x, _ in points) == 6
+    assert min(y for _, y in points) == 4
+    assert max(y for _, y in points) == 5
+    assert sum(centered) == sum(mask)
