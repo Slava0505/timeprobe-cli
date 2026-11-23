@@ -1,7 +1,7 @@
 ---
 name: timeprobe-cli
 description: Command reference for the timeprobe stopwatch, optional time target, desktop widget, and session history.
-version: 0.2.0
+version: 0.2.1
 ---
 
 # timeprobe CLI
@@ -10,7 +10,7 @@ version: 0.2.0
 
 App repository: [Slava0505/timeprobe-cli](https://github.com/Slava0505/timeprobe-cli). Requires Windows, Python 3.10+, and Git.
 
-If the CLI isn't available, use an existing local clone. If none exists, clone this repository into a permanent tools directory. In the clone, run `python -m venv .venv`, then `.venv\Scripts\python.exe -m pip install -e .`. Use `.venv\Scripts\timeprobe.exe` afterward; don't reinstall it for each session.
+If the bare `timeprobe` command isn't found, locate the existing clone and invoke its `.venv\Scripts\timeprobe.exe` by full path; don't assume the app is missing just because it isn't on `PATH`. If no clone exists, clone this repository into a permanent tools directory. In the clone, run `python -m venv .venv`, then `.venv\Scripts\python.exe -m pip install -e .`. Invoke `.venv\Scripts\timeprobe.exe` by path afterward; don't reinstall it for each session.
 
 ## Commands
 
