@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ctypes as c
-import math
 import time
 from ctypes import wintypes as w
 from pathlib import Path
@@ -11,10 +10,9 @@ from pathlib import Path
 from timeprobe import engine, store
 from timeprobe.model import snapshot
 from timeprobe.overlay import (
+    PanelRenderer,
     center_ink,
     display_time,
-    pause_coverage,
-    play_coverage,
     triangle_coverage,
 )
 
@@ -77,7 +75,7 @@ class Overlay:
         self.directory, self.session_id = directory, session_id
         self.user = c.WinDLL("user32", use_last_error=True)
         self.gdi = c.WinDLL("gdi32", use_last_error=True)
-        kernel = c.WinDLL("kernel32", use_last_error=True)
+        kernel = self.kernel = c.WinDLL("kernel32", use_last_error=True)
         self.instance = api(kernel, "GetModuleHandleW", w.HMODULE, w.LPCWSTR)(None)
         self.configure_api()
         # DPI awareness belongs to this worker process, not to the calling terminal.
@@ -118,6 +116,14 @@ class Overlay:
         self.image = None
         self.normal_frame = None
         self.tab_image = None
+        self.renderer = None
+        self.frame_cache = {}
+        self.frame_key = None
+        self.frame_timer = None
+        self.next_frame = 0.0
+        self.surface = None
+        self.surface_image = None
+        self.presented = None
         self.callback = WNDPROC(self.procedure)
         self.class_name = f"timeprobe-{session_id}"
 
@@ -149,7 +155,38 @@ class Overlay:
         self.timer = api(u, "SetTimer", c.c_size_t, w.HWND, c.c_size_t, w.UINT, ptr)
         self.kill_timer = api(u, "KillTimer", w.BOOL, w.HWND, c.c_size_t)
         self.double_click_time = api(u, "GetDoubleClickTime", w.UINT)
-        self.get_message = api(u, "GetMessageW", w.BOOL, c.POINTER(w.MSG), w.HWND, w.UINT, w.UINT)
+        self.native_get_message = api(
+            u, "GetMessageW", w.BOOL, c.POINTER(w.MSG), w.HWND, w.UINT, w.UINT
+        )
+        self.get_message = self.next_message
+        self.peek_message = api(
+            u, "PeekMessageW", w.BOOL, c.POINTER(w.MSG), w.HWND, w.UINT, w.UINT, w.UINT
+        )
+        self.wait_messages = api(
+            u,
+            "MsgWaitForMultipleObjectsEx",
+            w.DWORD,
+            w.DWORD,
+            c.POINTER(w.HANDLE),
+            w.DWORD,
+            w.DWORD,
+            w.DWORD,
+        )
+        self.create_frame_timer = api(
+            self.kernel, "CreateWaitableTimerExW", w.HANDLE, ptr, w.LPCWSTR, w.DWORD, w.DWORD
+        )
+        self.arm_frame_timer = api(
+            self.kernel,
+            "SetWaitableTimer",
+            w.BOOL,
+            w.HANDLE,
+            c.POINTER(c.c_longlong),
+            w.LONG,
+            ptr,
+            ptr,
+            w.BOOL,
+        )
+        self.close_handle = api(self.kernel, "CloseHandle", w.BOOL, w.HANDLE)
         self.translate = api(u, "TranslateMessage", w.BOOL, c.POINTER(w.MSG))
         self.dispatch = api(u, "DispatchMessageW", LRESULT, c.POINTER(w.MSG))
         self.track = api(u, "TrackMouseEvent", w.BOOL, c.POINTER(MouseTracking))
@@ -249,6 +286,9 @@ class Overlay:
                 raise OSError("Unable to create the pixel font")
             if not self.refresh():
                 return
+            # A high-resolution waitable timer avoids WM_TIMER's ~30 ms cadence.
+            # Older Windows versions retain the existing WM_TIMER fallback.
+            self.frame_timer = self.create_frame_timer(None, None, 0x2, 0x1F0003)
             self.show(self.window, 4)  # SW_SHOWNOACTIVATE
             with store.locked(self.directory) as data:
                 current = data["current"]
@@ -268,6 +308,10 @@ class Overlay:
             if self.failure:
                 raise self.failure
         finally:
+            self.release_surface()
+            if self.frame_timer:
+                self.close_handle(self.frame_timer)
+                self.frame_timer = None
             if self.window:
                 self.kill_timer(self.window, 1)
                 self.kill_timer(self.window, 2)
@@ -277,6 +321,26 @@ class Overlay:
                 self.delete_object(self.font)
             self.unregister(self.class_name, self.instance)
             self.remove_font(self.font_path, 0x10, None)
+
+    def next_message(self, message, window, first, last):
+        while self.animation is not None and self.frame_timer:
+            now = time.monotonic()
+            if now >= self.next_frame:
+                if not self.refresh():
+                    self.destroy(self.window)
+                self.next_frame = time.monotonic() + 1 / 120
+                if self.animation is None:
+                    break
+            if self.peek_message(message, window, first, last, 1):
+                return 0 if c.cast(message, c.POINTER(w.MSG)).contents.message == 0x12 else 1
+            due = c.c_longlong(-max(1, round((self.next_frame - time.monotonic()) * 10_000_000)))
+            if not self.arm_frame_timer(self.frame_timer, c.byref(due), 0, None, None, False):
+                raise c.WinError(c.get_last_error())
+            handles = (w.HANDLE * 1)(self.frame_timer)
+            result = self.wait_messages(1, handles, 0xFFFFFFFF, 0x04FF, 0x4)
+            if result == 0xFFFFFFFF:
+                raise c.WinError(c.get_last_error())
+        return self.native_get_message(message, window, first, last)
 
     def procedure(self, window, message, wp, lp):
         try:
@@ -298,6 +362,8 @@ class Overlay:
                             return 0
                     engine.execute("resume" if expected == "paused" else "pause", self.directory)
                     self.refresh()
+                    return 0
+                if self.animation is not None and getattr(self, "frame_timer", None):
                     return 0
                 if not self.refresh():
                     self.destroy(window)
@@ -390,6 +456,7 @@ class Overlay:
                 self.dragging = False
                 return 0
             if message == 2:  # WM_DESTROY
+                self.animation = None
                 self.user.PostQuitMessage(0)
                 return 0
         except Exception as error:
@@ -496,6 +563,16 @@ class Overlay:
         elif self.last_width is not None and self.last_width != width:
             self.position = self.position[0] + self.last_width - width, self.position[1]
         self.last_width = width
+        frame_key = text, width
+        if frame_key != self.frame_key:
+            self.frame_cache.clear()
+            self.frame_key = frame_key
+        variant = self.hovered, paused if self.hovered else False
+        if variant in self.frame_cache:
+            self.image = self.frame_cache[variant]
+            if not self.hovered:
+                self.normal_frame = self.image
+            return
         dc = self.create_dc(None)
         bitmap = None
         previous = None
@@ -517,39 +594,15 @@ class Overlay:
             self.gdi.GdiFlush()
             pixels = (c.c_ubyte * (width * height * 4)).from_address(address.value)
             mask = center_ink(bytes(pixels[::4]), width, height)
-            # Composite opaque sage digits over the exact approved translucent background.
-            foreground = (216, 230, 201)
-            background = (22, 29, 25)
-            radius = 6 * scale
-            for y in range(height):
-                for x in range(width):
-                    offset = (y * width + x) * 4
-                    distance = math.hypot(
-                        max(radius - x - 0.5, x + 0.5 - width + radius, 0),
-                        max(radius - y - 0.5, y + 0.5 - height + radius, 0),
-                    )
-                    coverage = max(0.0, min(1.0, radius + 0.5 - distance))
-                    text_alpha = mask[y * width + x] / 255 * (0.16 if self.hovered else 1)
-                    if self.hovered:
-                        if paused:
-                            icon_alpha = play_coverage(x, y, width, height, scale)
-                        else:
-                            icon_alpha = pause_coverage(x, y, width, height, scale)
-                        text_alpha = icon_alpha + text_alpha * (1 - icon_alpha)
-                    bg_alpha = 0.76
-                    alpha = (text_alpha + bg_alpha * (1 - text_alpha)) * coverage
-                    for channel, index in ((0, 2), (1, 1), (2, 0)):
-                        value = foreground[channel] * text_alpha + background[
-                            channel
-                        ] * bg_alpha * (1 - text_alpha)
-                        pixels[offset + index] = round(value * coverage)
-                    pixels[offset + 3] = round(alpha * 255)
+            if self.renderer is None or self.renderer.width != width:
+                self.renderer = PanelRenderer(width, height, scale)
+            panel = self.renderer.render(mask, self.hovered, paused)
             image = bytearray(full_width * height * 4)
-            panel = bytes(pixels)
             for y in range(height):
                 offset = (y * full_width + self.panel_offset) * 4
                 image[offset : offset + width * 4] = panel[y * width * 4 : (y + 1) * width * 4]
             self.image = bytes(image)
+            self.frame_cache[variant] = self.image
             if not self.hovered:
                 self.normal_frame = self.image
             if self.tab_image is None:
@@ -593,57 +646,69 @@ class Overlay:
             empty = x >= area.right
             x = min(x, area.right - 1)
             width = min(self.full_width, area.right - x)
-        # Clip at the work-area edge so the timer cannot leak onto a monitor to its right.
-        dc = self.create_dc(None)
-        bitmap = previous = None
-        try:
-            info = BitmapInfo()
-            info.header = BitmapHeader(
-                c.sizeof(BitmapHeader), width, -self.height, 1, 32, 0, 0, 0, 0, 0, 0
-            )
-            address = c.c_void_p()
-            bitmap = self.dib(dc, c.byref(info), 0, c.byref(address), None, 0)
-            if not bitmap or not address.value:
-                raise c.WinError(c.get_last_error())
-            previous = self.select(dc, bitmap)
+        source = b"" if empty else self.tab_image if tab_only else self.image
+        key = x, y, width, self.height, id(source)
+        if self.presented == key and self.surface_image is source:
+            return
+        if self.surface is None or self.surface[0] != (self.full_width, self.height):
+            self.release_surface()
+            dc = self.create_dc(None)
+            bitmap = previous = None
+            try:
+                info = BitmapInfo()
+                info.header = BitmapHeader(
+                    c.sizeof(BitmapHeader), self.full_width, -self.height, 1, 32, 0, 0, 0, 0, 0, 0
+                )
+                address = c.c_void_p()
+                bitmap = self.dib(dc, c.byref(info), 0, c.byref(address), None, 0)
+                if not bitmap or not address.value:
+                    raise c.WinError(c.get_last_error())
+                previous = self.select(dc, bitmap)
+                self.surface = (self.full_width, self.height), dc, bitmap, previous, address
+            except Exception:
+                if bitmap:
+                    self.delete_object(bitmap)
+                self.delete_dc(dc)
+                raise
+        _, dc, _, _, address = self.surface
+        # Keep a full-width source bitmap: Windows crops it to the visible window size.
+        if self.surface_image is not source:
             if tab_only or empty:
-                c.memset(address, 0, width * self.height * 4)
-            elif width == self.full_width:
-                c.memmove(address, self.image, len(self.image))
+                c.memset(address, 0, self.full_width * self.height * 4)
+                if tab_only:
+                    stride = self.handle_width * 4
+                    for row in range(self.height):
+                        c.memmove(
+                            address.value + row * self.full_width * 4,
+                            source[row * stride : (row + 1) * stride],
+                            stride,
+                        )
             else:
-                for row in range(self.height):
-                    start = row * self.full_width * 4
-                    c.memmove(
-                        address.value + row * width * 4,
-                        self.image[start : start + width * 4],
-                        width * 4,
-                    )
-            if tab_only:
-                stride = self.handle_width * 4
-                for row in range(self.height):
-                    c.memmove(
-                        address.value + row * width * 4,
-                        self.tab_image[row * stride : (row + 1) * stride],
-                        stride,
-                    )
-            if not self.layer(
-                self.window,
-                None,
-                c.byref(w.POINT(x, y)),
-                c.byref(w.SIZE(width, self.height)),
-                dc,
-                c.byref(w.POINT(0, 0)),
-                0,
-                c.byref(Blend(0, 0, 255, 1)),
-                2,
-            ):
-                raise c.WinError(c.get_last_error())
-        finally:
-            if previous:
-                self.select(dc, previous)
-            if bitmap:
-                self.delete_object(bitmap)
+                c.memmove(address, source, len(source))
+            self.surface_image = source
+        if not self.layer(
+            self.window,
+            None,
+            c.byref(w.POINT(x, y)),
+            c.byref(w.SIZE(width, self.height)),
+            dc,
+            c.byref(w.POINT(0, 0)),
+            0,
+            c.byref(Blend(0, 0, 255, 1)),
+            2,
+        ):
+            raise c.WinError(c.get_last_error())
+        self.presented = key
+
+    def release_surface(self):
+        if self.surface is not None:
+            _, dc, bitmap, previous, _ = self.surface
+            self.select(dc, previous)
+            self.delete_object(bitmap)
             self.delete_dc(dc)
+            self.surface = None
+        self.surface_image = None
+        self.presented = None
 
 
 def run(directory: Path, session_id: str):

@@ -5,12 +5,63 @@ import math
 import pytest
 
 from timeprobe.overlay import (
+    PanelRenderer,
     center_ink,
     display_time,
     pause_coverage,
     play_coverage,
     triangle_coverage,
 )
+
+
+@pytest.mark.parametrize("scale", [1, 1.5, 4])
+@pytest.mark.parametrize("hovered,paused", [(False, False), (True, False), (True, True)])
+def test_palette_renderer_matches_original_compositing(scale, hovered, paused):
+    width, height = round(124 * scale), round(48 * scale)
+    mask = bytes((index * 37) % 256 for index in range(width * height))
+    expected = bytearray()
+    for y in range(height):
+        for x in range(width):
+            radius = 6 * scale
+            distance = math.hypot(
+                max(radius - x - 0.5, x + 0.5 - width + radius, 0),
+                max(radius - y - 0.5, y + 0.5 - height + radius, 0),
+            )
+            coverage = max(0, min(1, radius + 0.5 - distance))
+            alpha = mask[y * width + x] / 255 * (0.16 if hovered else 1)
+            if hovered:
+                icon = play_coverage if paused else pause_coverage
+                icon_alpha = icon(x, y, width, height, scale)
+                alpha = icon_alpha + alpha * (1 - icon_alpha)
+            expected.extend(
+                round((fg * alpha + bg * 0.76 * (1 - alpha)) * coverage)
+                for fg, bg in ((201, 25), (230, 29), (216, 22))
+            )
+            expected.append(round((alpha + 0.76 * (1 - alpha)) * coverage * 255))
+    renderer = PanelRenderer(width, height, scale)
+    assert renderer.render(mask, hovered, paused) == bytes(expected)
+
+
+@pytest.mark.parametrize("width,height", [(1, 1), (7, 9), (32, 17)])
+def test_center_ink_preserves_sparse_and_full_masks(width, height):
+    for mask in (
+        bytes(width * height),
+        bytes([255] * (width * height)),
+        bytes(127 if index % 7 == 2 else 0 for index in range(width * height)),
+    ):
+        occupied = [index for index, value in enumerate(mask) if value]
+        if not occupied:
+            assert center_ink(mask, width, height) == mask
+            continue
+        left = min(index % width for index in occupied)
+        right = max(index % width for index in occupied)
+        top, bottom = occupied[0] // width, occupied[-1] // width
+        dx = (width - (right - left + 1)) // 2 - left
+        dy = (height - (bottom - top + 1)) // 2 - top
+        expected = bytearray(width * height)
+        for index in occupied:
+            expected[(index // width + dy) * width + index % width + dx] = mask[index]
+        assert center_ink(mask, width, height) == bytes(expected)
 
 
 @pytest.mark.parametrize("scale", [1, 1.5, 2, 8])

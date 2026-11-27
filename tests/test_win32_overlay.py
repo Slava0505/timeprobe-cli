@@ -17,6 +17,86 @@ from timeprobe import engine, store
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Native Windows widget")
 
 
+def test_drag_reuses_native_surface_and_skips_unchanged_frames(tmp_path, monkeypatch):
+    from timeprobe.win32_overlay import Overlay
+
+    monkeypatch.setattr(engine, "spawn", lambda *_: os.getpid())
+    session = engine.execute("start", tmp_path, visible=True)
+    overlay = Overlay(tmp_path, session["id"])
+    overlay.show = lambda *_: True
+
+    def inspect(*_):
+        surface = overlay.surface
+        layer = overlay.layer
+        calls = []
+        overlay.layer = lambda *args: calls.append(args) or layer(*args)
+        overlay.dib = lambda *_: pytest.fail("Dragging must reuse the existing bitmap")
+        overlay.present()
+        assert not calls
+        overlay.dragging = True
+        for dx in range(1, 80):
+            overlay.drag_position = overlay.position[0] + dx, overlay.position[1]
+            overlay.present()
+            assert overlay.surface is surface
+            assert overlay.surface_image is overlay.image
+        assert len(calls) == 79
+        assert c.string_at(surface[4], len(overlay.image)) == overlay.image
+        overlay.dragging = False
+        return 0
+
+    overlay.get_message = inspect
+    overlay.start()
+    assert overlay.surface is None
+    assert overlay.frame_timer is None
+
+
+@pytest.mark.parametrize("close_during_animation", [False, True])
+def test_high_resolution_message_pump_animates_and_still_dispatches_input(
+    tmp_path, monkeypatch, close_during_animation
+):
+    from timeprobe.win32_overlay import Overlay, api
+
+    monkeypatch.setattr(engine, "spawn", lambda *_: os.getpid())
+    session = engine.execute("start", tmp_path, visible=True)
+    overlay = Overlay(tmp_path, session["id"])
+    overlay.show = lambda *_: True
+    get_message = overlay.get_message
+    dispatched = []
+    dispatch = overlay.dispatch
+    post = api(overlay.user, "PostMessageW", w.BOOL, w.HWND, w.UINT, w.WPARAM, w.LPARAM)
+    started = False
+
+    def get(*args):
+        nonlocal started
+        if not started:
+            started = True
+            overlay.set_hidden(True)
+            assert post(overlay.window, 0x8001, 0, 0)
+            if close_during_animation:
+                assert post(overlay.window, 0x10, 0, 0)
+        elif overlay.animation is None and not close_during_animation:
+            assert overlay.reveal == 0
+            assert 0x8001 in dispatched
+            return 0
+        return get_message(*args)
+
+    def record(message):
+        dispatched.append(c.cast(message, c.POINTER(w.MSG)).contents.message)
+        return dispatch(message)
+
+    # Other native tests can leave WM_QUIT in this thread's queue.
+    message = w.MSG()
+    while overlay.peek_message(c.byref(message), None, 0x12, 0x12, 1):
+        pass
+    overlay.get_message = get
+    overlay.dispatch = record
+    overlay.start()
+    assert overlay.failure is None
+    assert overlay.animation is None
+    assert 0x8001 in dispatched
+    assert overlay.frame_timer is None
+
+
 def test_paused_and_running_digits_have_the_same_brightness(tmp_path, monkeypatch):
     from timeprobe.win32_overlay import Overlay
 

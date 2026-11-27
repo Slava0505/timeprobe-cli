@@ -6,6 +6,99 @@ import math
 from typing import Any
 
 
+def panel_pixel(alpha: float, coverage: float = 1.0) -> bytes:
+    """Premultiplied BGRA, shared by the cached palette and antialiased borders."""
+    return bytes(
+        [
+            round((foreground * alpha + background * 0.76 * (1 - alpha)) * coverage)
+            for foreground, background in ((201, 25), (230, 29), (216, 22))
+        ]
+        + [round((alpha + 0.76 * (1 - alpha)) * coverage * 255)]
+    )
+
+
+class PanelRenderer:
+    """Cache geometry; composite changing glyph masks through a 256-color palette."""
+
+    def __init__(self, width: int, height: int, scale: float):
+        self.width, self.height, self.scale = width, height, scale
+        self.palettes = {
+            hovered: tuple(
+                panel_pixel(value / 255 * (0.16 if hovered else 1)) for value in range(256)
+            )
+            for hovered in (False, True)
+        }
+        self.tables = {
+            hovered: tuple(bytes(pixel[channel] for pixel in palette) for channel in range(4))
+            for hovered, palette in self.palettes.items()
+        }
+        self.corners = []
+        self.icons = {paused: self.icon_geometry(paused) for paused in (False, True)}
+        radius = 6 * scale
+        corner = min(math.ceil(6 * scale + 1), width // 2, height // 2)
+        for y in (*range(corner), *range(height - corner, height)):
+            for x in (*range(corner), *range(width - corner, width)):
+                distance = math.hypot(
+                    max(radius - x - 0.5, x + 0.5 - width + radius, 0),
+                    max(radius - y - 0.5, y + 0.5 - height + radius, 0),
+                )
+                coverage = max(0.0, min(1.0, radius + 0.5 - distance))
+                if coverage < 1:
+                    self.corners.append((y * width + x, coverage))
+
+    def icon_geometry(self, paused: bool):
+        icon = play_coverage if paused else pause_coverage
+        runs, edges = [], []
+        for y in range(
+            max(0, int(self.height / 2 - 16 * self.scale)),
+            min(self.height, math.ceil(self.height / 2 + 16 * self.scale)),
+        ):
+            start = None
+            end = min(self.width, math.ceil(self.width / 2 + 16 * self.scale))
+            for x in range(max(0, int(self.width / 2 - 16 * self.scale)), end):
+                coverage = icon(x, y, self.width, self.height, self.scale)
+                if coverage == 1:
+                    if start is None:
+                        start = x
+                else:
+                    if start is not None:
+                        runs.append(
+                            (
+                                (y * self.width + start) * 4,
+                                (y * self.width + x) * 4,
+                                panel_pixel(1) * (x - start),
+                            )
+                        )
+                        start = None
+                    if coverage > 0:
+                        edges.append((y * self.width + x, coverage))
+            if start is not None:
+                runs.append(
+                    (
+                        (y * self.width + start) * 4,
+                        (y * self.width + end) * 4,
+                        panel_pixel(1) * (end - start),
+                    )
+                )
+        return runs, edges
+
+    def render(self, mask: bytes, hovered: bool, paused: bool) -> bytes:
+        pixels = bytearray(len(mask) * 4)
+        for channel, table in enumerate(self.tables[hovered]):
+            pixels[channel::4] = mask.translate(table)
+        if hovered:
+            runs, edges = self.icons[paused]
+            for start, end, pixel_run in runs:
+                pixels[start:end] = pixel_run
+            for index, coverage in edges:
+                alpha = coverage + mask[index] / 255 * 0.16 * (1 - coverage)
+                pixels[index * 4 : index * 4 + 4] = panel_pixel(alpha)
+        for index, coverage in self.corners:
+            alpha = mask[index] / 255 * (0.16 if hovered else 1)
+            pixels[index * 4 : index * 4 + 4] = panel_pixel(alpha, coverage)
+        return bytes(pixels)
+
+
 def triangle_coverage(x: int, y: int, scale: float, points_left: bool) -> float:
     """160% edge triangle with 2.5-pixel rounded corners and antialiased edges."""
     size = scale * 1.6
@@ -50,19 +143,23 @@ def pause_coverage(x: int, y: int, width: int, height: int, scale: float) -> flo
 
 def center_ink(mask: bytes, width: int, height: int) -> bytes:
     """Center the visible pixels, independent of a font's ascender/descender metrics."""
-    occupied = [index for index, value in enumerate(mask) if value]
-    if not occupied:
+    rows = []
+    for y in range(height):
+        row = mask[y * width : (y + 1) * width]
+        trimmed = row.strip(b"\0")
+        if trimmed:
+            left = width - len(row.lstrip(b"\0"))
+            rows.append((y, left, left + len(trimmed), row))
+    if not rows:
         return mask
-    left = min(index % width for index in occupied)
-    right = max(index % width for index in occupied)
-    top, bottom = occupied[0] // width, occupied[-1] // width
-    dx = (width - (right - left + 1)) // 2 - left
-    dy = (height - (bottom - top + 1)) // 2 - top
+    left = min(row[1] for row in rows)
+    right = max(row[2] for row in rows)
+    dx = (width - (right - left)) // 2 - left
+    dy = (height - (rows[-1][0] - rows[0][0] + 1)) // 2 - rows[0][0]
     centered = bytearray(width * height)
-    for index in occupied:
-        x, y = index % width + dx, index // width + dy
-        if 0 <= x < width and 0 <= y < height:
-            centered[y * width + x] = mask[index]
+    for y, _, _, row in rows:
+        start = (y + dy) * width + left + dx
+        centered[start : start + right - left] = row[left:right]
     return bytes(centered)
 
 
