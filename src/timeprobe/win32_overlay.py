@@ -10,7 +10,13 @@ from pathlib import Path
 
 from timeprobe import engine, store
 from timeprobe.model import snapshot
-from timeprobe.overlay import center_ink, display_time
+from timeprobe.overlay import (
+    center_ink,
+    display_time,
+    pause_coverage,
+    play_coverage,
+    triangle_coverage,
+)
 
 LRESULT = c.c_ssize_t
 WNDPROC = c.WINFUNCTYPE(LRESULT, w.HWND, w.UINT, w.WPARAM, w.LPARAM)
@@ -85,6 +91,7 @@ class Overlay:
             if not current or current["id"] != session_id:
                 raise ValueError("Session is no longer active")
             self.scale = self.dpi_scale * current.get("scale", 1.0)
+            self.hidden = current.get("widget_hidden", True)
         self.font_path = str(Path(__file__).parent / "assets" / "tiny5.ttf")
         if not self.add_font(self.font_path, 0x10, None):
             raise OSError("Unable to load the bundled Tiny5 font")
@@ -98,7 +105,19 @@ class Overlay:
         self.last_width = None
         self.pointer_start = None
         self.drag_origin = None
+        self.drag_position = None
+        self.last_drag_step = 0.0
         self.dragging = False
+        self.pressed_handle = False
+        self.pending_click = None
+        self.handle_width = max(1, round(24 * self.scale))
+        self.edge_gap = round(4 * self.scale)
+        self.panel_offset = self.handle_width + round(4 * self.scale)
+        self.reveal = 0.0 if self.hidden else 1.0
+        self.animation = None
+        self.image = None
+        self.normal_frame = None
+        self.tab_image = None
         self.callback = WNDPROC(self.procedure)
         self.class_name = f"timeprobe-{session_id}"
 
@@ -129,6 +148,7 @@ class Overlay:
         self.show = api(u, "ShowWindow", w.BOOL, w.HWND, c.c_int)
         self.timer = api(u, "SetTimer", c.c_size_t, w.HWND, c.c_size_t, w.UINT, ptr)
         self.kill_timer = api(u, "KillTimer", w.BOOL, w.HWND, c.c_size_t)
+        self.double_click_time = api(u, "GetDoubleClickTime", w.UINT)
         self.get_message = api(u, "GetMessageW", w.BOOL, c.POINTER(w.MSG), w.HWND, w.UINT, w.UINT)
         self.translate = api(u, "TranslateMessage", w.BOOL, c.POINTER(w.MSG))
         self.dispatch = api(u, "DispatchMessageW", LRESULT, c.POINTER(w.MSG))
@@ -199,6 +219,7 @@ class Overlay:
 
     def start(self):
         wc = WindowClass()
+        wc.style = 0x0008  # CS_DBLCLKS
         wc.procedure, wc.instance, wc.name = self.callback, self.instance, self.class_name
         wc.cursor = self.load_cursor(None, c.c_void_p(32649))  # IDC_HAND
         if not self.register(c.byref(wc)):
@@ -249,6 +270,7 @@ class Overlay:
         finally:
             if self.window:
                 self.kill_timer(self.window, 1)
+                self.kill_timer(self.window, 2)
                 self.destroy(self.window)
                 self.window = None
             if self.font:
@@ -261,6 +283,22 @@ class Overlay:
             if message == 0x21:  # WM_MOUSEACTIVATE: accept click without taking keyboard focus.
                 return 3
             if message == 0x113:  # WM_TIMER
+                if wp == 2:
+                    if self.pending_click is not None and time.monotonic() < self.click_deadline:
+                        return 0
+                    expected = self.pending_click
+                    self.cancel_click()
+                    with store.locked(self.directory) as data:
+                        current = data["current"]
+                        if (
+                            not current
+                            or current["id"] != self.session_id
+                            or current["state"] != expected
+                        ):
+                            return 0
+                    engine.execute("resume" if expected == "paused" else "pause", self.directory)
+                    self.refresh()
+                    return 0
                 if not self.refresh():
                     self.destroy(window)
                 return 0
@@ -269,15 +307,21 @@ class Overlay:
                     point = w.POINT()
                     self.cursor_position(c.byref(point))
                     dx, dy = point.x - self.pointer_start[0], point.y - self.pointer_start[1]
-                    if self.dragging or max(abs(dx), abs(dy)) >= round(4 * self.scale):
+                    if self.dragging or max(abs(dx), abs(dy)) >= round(4 * self.dpi_scale):
+                        self.cancel_click()
+                        self.animation = None
                         self.dragging = True
                         self.hovered = False
-                        self.position = self.drag_origin[0] + dx, self.drag_origin[1] + dy
-                        self.move(window, w.HWND(-1), *self.position, 0, 0, 0x0011)
+                        if self.normal_frame is not None and len(self.normal_frame) == len(
+                            self.image
+                        ):
+                            self.image = self.normal_frame
+                        self.drag_position = self.drag_origin[0] + dx, self.drag_origin[1] + dy
                         self.refresh()
                         return 0
-                if not self.hovered:
-                    self.hovered = True
+                hovered = not self.hidden and c.c_short(lp & 0xFFFF).value >= self.panel_offset
+                if hovered != self.hovered:
+                    self.hovered = hovered
                     self.track(c.byref(MouseTracking(c.sizeof(MouseTracking), 2, window, 0)))
                     self.refresh()
                 return 0
@@ -289,28 +333,59 @@ class Overlay:
                 point = w.POINT()
                 self.cursor_position(c.byref(point))
                 self.pointer_start = point.x, point.y
-                self.drag_origin = self.position
+                self.drag_origin = self.body_position()
                 self.dragging = False
+                self.pressed_handle = (
+                    self.hidden or c.c_short(lp & 0xFFFF).value < self.panel_offset
+                )
                 self.capture(window)
                 return 0
+            if message == 0x203:  # WM_LBUTTONDBLCLK
+                self.cancel_click()
+                self.pointer_start = None
+                self.dragging = False
+                self.release_capture()
+                if not self.hidden:
+                    self.set_hidden(True)
+                    self.refresh()
+                return 0
             if message == 0x202:  # WM_LBUTTONUP
+                if self.pointer_start is None:
+                    return 0
                 dragged = self.dragging
+                handle = self.pressed_handle
+                point = w.POINT()
+                self.cursor_position(c.byref(point))
+                dx = point.x - self.pointer_start[0]
                 self.pointer_start = None
                 self.dragging = False
                 self.release_capture()
                 if dragged:
-                    self.hovered = True
+                    self.finish_drag(dx, handle)
+                    self.refresh()
+                    return 0
+                if handle:
+                    self.cancel_click()
+                    self.set_hidden(dx > 0 if dragged else not self.hidden)
                     self.refresh()
                     return 0
                 with store.locked(self.directory) as data:
                     current = data["current"]
                     if not current or current["id"] != self.session_id:
                         return 0
-                    action = "resume" if current["state"] == "paused" else "pause"
-                engine.execute(action, self.directory)
-                self.refresh()
+                    self.pending_click = current["state"]
+                interval = self.double_click_time()
+                self.click_deadline = time.monotonic() + interval / 1000
+                if not self.timer(window, 2, interval, None):
+                    raise c.WinError(c.get_last_error())
                 return 0
             if message == 0x215:  # WM_CAPTURECHANGED
+                if self.dragging:
+                    point = w.POINT()
+                    self.cursor_position(c.byref(point))
+                    dx = point.x - self.pointer_start[0]
+                    self.dragging = False
+                    self.finish_drag(dx, self.pressed_handle)
                 self.pointer_start = None
                 self.dragging = False
                 return 0
@@ -324,7 +399,70 @@ class Overlay:
             return 0
         return self.default(window, message, wp, lp)
 
+    def cancel_click(self):
+        if self.pending_click is not None:
+            self.kill_timer(self.window, 2)
+            self.pending_click = None
+
+    def set_hidden(self, hidden):
+        if hidden == self.hidden and self.reveal == (0.0 if hidden else 1.0):
+            return
+        self.hidden = hidden
+        self.hovered = False
+        if self.normal_frame is not None and len(self.normal_frame) == len(self.image):
+            self.image = self.normal_frame
+        with store.locked(self.directory) as data:
+            current = data["current"]
+            if current and current["id"] == self.session_id:
+                current["widget_hidden"] = hidden
+        self.animation = time.monotonic(), self.reveal
+        self.timer(self.window, 1, 16, None)
+
+    def body_position(self):
+        area = w.RECT()
+        if not self.work_area(0x30, 0, c.byref(area), 0):
+            raise c.WinError(c.get_last_error())
+        hidden_x = area.right - self.panel_offset
+        return round(hidden_x + (self.position[0] - hidden_x) * self.reveal), self.position[1]
+
+    def finish_drag(self, dx, handle):
+        x, y = self.drag_position
+        self.drag_position = None
+        area = w.RECT()
+        if not self.work_area(0x30, 0, c.byref(area), 0):
+            raise c.WinError(c.get_last_error())
+        if not handle and x + self.full_width < area.right:
+            self.position = x, y
+            self.reveal = 1.0
+            self.previous = None
+            return
+        self.position = min(self.position[0], x), y
+        end = area.right - self.panel_offset
+        travel = end - self.position[0]
+        self.reveal = max(0.0, min(1.0, (end - x) / travel)) if travel > 0 else 0.0
+        self.set_hidden(dx >= 0 if handle else True)
+
     def refresh(self):
+        if self.dragging:
+            tick = time.monotonic()
+            if tick - self.last_drag_step >= 0.1:
+                if not engine.step(self.directory, self.session_id):
+                    return False
+                self.last_drag_step = tick
+            self.present()
+            return True
+        if self.animation is not None:
+            started, origin = self.animation
+            progress = min(1.0, (time.monotonic() - started) / 0.26)
+            eased = 1 - (1 - progress) ** 3
+            target = 0.0 if self.hidden else 1.0
+            self.reveal = origin + (target - origin) * eased
+            self.present()
+            if progress == 1:
+                self.animation = None
+                self.previous = None
+                self.timer(self.window, 1, 100, None)
+            return True
         if not engine.step(self.directory, self.session_id):
             return False
         with store.locked(self.directory) as data:
@@ -334,9 +472,10 @@ class Overlay:
             session = snapshot(current, time.monotonic())
         text, self.wide = display_time(session, self.wide)
         key = text, session["state"], self.hovered
-        if key != self.previous:
+        if key != self.previous and (not self.hidden or self.image is None):
             self.paint(text, session["state"] == "paused")
             self.previous = key
+        self.present()
         return True
 
     def paint(self, text, paused):
@@ -345,18 +484,18 @@ class Overlay:
         # Allow very long sessions without compressing the normal MM:SS layout.
         width = max(width, round((len(text) * 18 + 16) * scale))
         height = round(48 * scale)
+        full_width = width + self.panel_offset
         area = w.RECT()
         if not self.work_area(0x30, 0, c.byref(area), 0):
             raise c.WinError(c.get_last_error())
         if self.position is None:
             self.position = (
-                area.right - width - round(9 * self.dpi_scale),
+                area.right - full_width - round(9 * self.dpi_scale),
                 area.top + round(44 * self.dpi_scale),
             )
         elif self.last_width is not None and self.last_width != width:
             self.position = self.position[0] + self.last_width - width, self.position[1]
         self.last_width = width
-        destination = w.POINT(*self.position)
         dc = self.create_dc(None)
         bitmap = None
         previous = None
@@ -390,18 +529,13 @@ class Overlay:
                         max(radius - y - 0.5, y + 0.5 - height + radius, 0),
                     )
                     coverage = max(0.0, min(1.0, radius + 0.5 - distance))
-                    text_alpha = (
-                        mask[y * width + x]
-                        / 255
-                        * (0.16 if self.hovered else 0.65 if paused else 1)
-                    )
+                    text_alpha = mask[y * width + x] / 255 * (0.16 if self.hovered else 1)
                     if self.hovered:
-                        px, py = (x - width / 2) / scale, (y - height / 2) / scale
-                        icon = (-5 <= px <= -2 or 2 <= px <= 5) and abs(py) <= 8.5
                         if paused:
-                            icon = -4 <= px <= 7 and abs(py) <= (7 - px) * 0.72
-                        if icon:
-                            text_alpha = 1
+                            icon_alpha = play_coverage(x, y, width, height, scale)
+                        else:
+                            icon_alpha = pause_coverage(x, y, width, height, scale)
+                        text_alpha = icon_alpha + text_alpha * (1 - icon_alpha)
                     bg_alpha = 0.76
                     alpha = (text_alpha + bg_alpha * (1 - text_alpha)) * coverage
                     for channel, index in ((0, 2), (1, 1), (2, 0)):
@@ -410,11 +544,93 @@ class Overlay:
                         ] * bg_alpha * (1 - text_alpha)
                         pixels[offset + index] = round(value * coverage)
                     pixels[offset + 3] = round(alpha * 255)
+            image = bytearray(full_width * height * 4)
+            panel = bytes(pixels)
+            for y in range(height):
+                offset = (y * full_width + self.panel_offset) * 4
+                image[offset : offset + width * 4] = panel[y * width * 4 : (y + 1) * width * 4]
+            self.image = bytes(image)
+            if not self.hovered:
+                self.normal_frame = self.image
+            if self.tab_image is None:
+                tab = bytearray(self.handle_width * height * 4)
+                for y in range(height):
+                    for x in range(self.handle_width):
+                        offset = (y * self.handle_width + x) * 4
+                        # Near-transparent pixels keep the whole tab easy to grab.
+                        tab[offset + 3] = 1
+                        coverage = triangle_coverage(x, y, scale, True)
+                        if coverage:
+                            tab[offset : offset + 4] = bytes(
+                                (
+                                    round(25 * 0.89 * coverage),
+                                    round(29 * 0.89 * coverage),
+                                    round(22 * 0.89 * coverage),
+                                    max(1, round(255 * 0.89 * coverage)),
+                                )
+                            )
+                self.tab_image = bytes(tab)
+            self.full_width, self.height = full_width, height
+        finally:
+            if previous:
+                self.select(dc, previous)
+            if bitmap:
+                self.delete_object(bitmap)
+            if dc:
+                self.delete_dc(dc)
+
+    def present(self):
+        area = w.RECT()
+        if not self.work_area(0x30, 0, c.byref(area), 0):
+            raise c.WinError(c.get_last_error())
+        tab_only = self.hidden and self.reveal == 0 and not self.dragging
+        if tab_only:
+            x, y = area.right - self.edge_gap - self.handle_width, self.position[1]
+            width = self.handle_width
+            empty = False
+        else:
+            x, y = self.drag_position if self.dragging else self.body_position()
+            empty = x >= area.right
+            x = min(x, area.right - 1)
+            width = min(self.full_width, area.right - x)
+        # Clip at the work-area edge so the timer cannot leak onto a monitor to its right.
+        dc = self.create_dc(None)
+        bitmap = previous = None
+        try:
+            info = BitmapInfo()
+            info.header = BitmapHeader(
+                c.sizeof(BitmapHeader), width, -self.height, 1, 32, 0, 0, 0, 0, 0, 0
+            )
+            address = c.c_void_p()
+            bitmap = self.dib(dc, c.byref(info), 0, c.byref(address), None, 0)
+            if not bitmap or not address.value:
+                raise c.WinError(c.get_last_error())
+            previous = self.select(dc, bitmap)
+            if tab_only or empty:
+                c.memset(address, 0, width * self.height * 4)
+            elif width == self.full_width:
+                c.memmove(address, self.image, len(self.image))
+            else:
+                for row in range(self.height):
+                    start = row * self.full_width * 4
+                    c.memmove(
+                        address.value + row * width * 4,
+                        self.image[start : start + width * 4],
+                        width * 4,
+                    )
+            if tab_only:
+                stride = self.handle_width * 4
+                for row in range(self.height):
+                    c.memmove(
+                        address.value + row * width * 4,
+                        self.tab_image[row * stride : (row + 1) * stride],
+                        stride,
+                    )
             if not self.layer(
                 self.window,
                 None,
-                c.byref(destination),
-                c.byref(w.SIZE(width, height)),
+                c.byref(w.POINT(x, y)),
+                c.byref(w.SIZE(width, self.height)),
                 dc,
                 c.byref(w.POINT(0, 0)),
                 0,
@@ -427,8 +643,7 @@ class Overlay:
                 self.select(dc, previous)
             if bitmap:
                 self.delete_object(bitmap)
-            if dc:
-                self.delete_dc(dc)
+            self.delete_dc(dc)
 
 
 def run(directory: Path, session_id: str):

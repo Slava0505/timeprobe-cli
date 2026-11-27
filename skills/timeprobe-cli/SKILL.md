@@ -1,7 +1,7 @@
 ---
 name: timeprobe-cli
 description: Command reference for the timeprobe stopwatch, optional time target, desktop widget, and session history.
-version: 0.2.1
+version: 0.3.3
 ---
 
 # timeprobe CLI
@@ -16,9 +16,19 @@ If the bare `timeprobe` command isn't found, locate the existing clone and invok
 
 Run commands without opening a visible console. Request structured output with `--json`.
 
+By default, only a triangle is shown at the right edge. Click it or drag it left
+to reveal the digits. The triangle disappears while open; double-click the timer
+or drag it to the right edge to hide it. Hiding never pauses the session. Use `--visible` on start
+to show the timer immediately.
+
+Dragging follows the pointer directly. Release the timer near the right edge to
+finish hiding it; pull the triangle left and release to finish revealing it.
+
 | Command | Action |
 | --- | --- |
 | `timeprobe start --json` | Start a stopwatch |
+| `timeprobe start --scale 4 --json` | Start a stopwatch at four times the normal width and height |
+| `timeprobe start --scale 2 --visible --json` | Show a double-sized stopwatch immediately |
 | `timeprobe start --target 30m --json` | Start a session with a planned duration |
 | `timeprobe status --json` | Read the current session |
 | `timeprobe pause --json` | Freeze elapsed time |

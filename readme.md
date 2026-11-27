@@ -7,6 +7,21 @@ check the time, or record the result.
 A small pixel display stays above your other windows. Hover and click to pause
 or resume; drag it wherever it fits.
 
+Use `timeprobe start --scale 4` for a widget four times as wide and tall.
+The default scale is `1`. The widget opens near the top-right corner; increasing
+the scale grows it leftward and downward without changing the corner margins.
+
+By default, only a small triangle stays at the right edge. Click it or drag it
+left to reveal the timer. The triangle disappears while the timer is open.
+Double-click the timer or drag it to the right edge to hide it. Hiding preserves
+the running or paused state. A single click pauses or resumes after the Windows
+double-click interval, allowing a double-click to hide without toggling pause.
+While dragging the timer or pulling its triangle, the widget follows the pointer.
+Releasing near the edge completes the slide from the release position. The timer
+is clipped at the screen edge; the triangle appears after the digits slide out.
+Use `timeprobe start --visible` to show the digits immediately, or combine it
+with `--scale 2 --visible` for workouts.
+
 ![Concept preview: a translucent pixel stopwatch in the upper-right corner of a desktop window](assets/desktop-preview.png)
 
 *Desktop concept preview. The widget shows only the time; pause appears on hover.*
