@@ -10,3 +10,4 @@ dist/
 state.json
 state.lock
 uv.lock
+problems.md
