@@ -70,6 +70,26 @@ def test_real_cli_early_stop_with_target(cli):
     assert stopped["signal_state"] == "pending"
 
 
+@pytest.mark.parametrize("scale", ["1", "4", "1.5"])
+def test_scale_is_preserved_through_session_and_history(cli, scale):
+    assert cli("start", "--scale", scale)["scale"] == float(scale)
+    assert cli("status")["scale"] == float(scale)
+    assert cli("pause")["scale"] == float(scale)
+    assert cli("resume")["scale"] == float(scale)
+    assert cli("stop")["scale"] == float(scale)
+    assert cli("history")["sessions"][0]["scale"] == float(scale)
+
+
+def test_default_scale_is_one(cli):
+    result = cli("start")
+    assert result["scale"] == 1
+    assert result["widget_hidden"] is True
+
+
+def test_start_visible(cli):
+    assert cli("start", "--visible")["widget_hidden"] is False
+
+
 def test_parallel_start_only_one_session(cli, tmp_path):
     def launch(_):
         environment = {**os.environ, "TIMEPROBE_STATE_DIR": str(tmp_path)}
@@ -106,7 +126,13 @@ def test_worker_death_leaves_interrupted_history(cli, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "args", [("start", "--target", "0s"), ("start", "--target", "bad"), ("pomodoro",)]
+    "args",
+    [
+        ("start", "--target", "0s"),
+        ("start", "--target", "bad"),
+        ("pomodoro",),
+        *[("start", "--scale", scale) for scale in ("0", "-1", "nan", "inf", "bad")],
+    ],
 )
 def test_bad_arguments_are_json(cli, args):
     assert cli(*args, code=2)["error"]["code"] == "invalid_arguments"

@@ -54,7 +54,13 @@ def spawn(directory: Path, session_id: str) -> int:
     return pid
 
 
-def execute(action: str, directory: Path, target: float | None = None) -> dict[str, Any]:
+def execute(
+    action: str,
+    directory: Path,
+    target: float | None = None,
+    scale: float = 1.0,
+    visible: bool = False,
+) -> dict[str, Any]:
     failure = None
     with store.locked(directory) as data:
         maintain(data)
@@ -78,6 +84,8 @@ def execute(action: str, directory: Path, target: float | None = None) -> dict[s
                     "elapsed_seconds": 0.0,
                     "running_since": tick,
                     "target_seconds": target,
+                    "scale": scale,
+                    "widget_hidden": not visible,
                     "signal_state": "pending" if target is not None else "disabled",
                     "signal_error": None,
                     "worker_pid": None,

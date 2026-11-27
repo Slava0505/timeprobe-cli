@@ -79,7 +79,12 @@ class Overlay:
             api(self.user, "SetProcessDpiAwarenessContext", w.BOOL, c.c_void_p)(c.c_void_p(-4))
         except AttributeError:
             self.user.SetProcessDPIAware()
-        self.scale = api(self.user, "GetDpiForSystem", w.UINT)() / 96
+        self.dpi_scale = api(self.user, "GetDpiForSystem", w.UINT)() / 96
+        with store.locked(directory) as data:
+            current = data["current"]
+            if not current or current["id"] != session_id:
+                raise ValueError("Session is no longer active")
+            self.scale = self.dpi_scale * current.get("scale", 1.0)
         self.font_path = str(Path(__file__).parent / "assets" / "tiny5.ttf")
         if not self.add_font(self.font_path, 0x10, None):
             raise OSError("Unable to load the bundled Tiny5 font")
@@ -344,7 +349,10 @@ class Overlay:
         if not self.work_area(0x30, 0, c.byref(area), 0):
             raise c.WinError(c.get_last_error())
         if self.position is None:
-            self.position = area.right - width - round(9 * scale), area.top + round(44 * scale)
+            self.position = (
+                area.right - width - round(9 * self.dpi_scale),
+                area.top + round(44 * self.dpi_scale),
+            )
         elif self.last_width is not None and self.last_width != width:
             self.position = self.position[0] + self.last_width - width, self.position[1]
         self.last_width = width

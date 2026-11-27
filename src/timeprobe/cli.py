@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from typing import Any
 
@@ -19,6 +20,13 @@ def positive_duration(value: str) -> float:
         raise argparse.ArgumentTypeError(str(error)) from error
 
 
+def positive_scale(value: str) -> float:
+    scale = float(value)
+    if not math.isfinite(scale) or scale <= 0:
+        raise argparse.ArgumentTypeError("scale must be a finite number greater than zero")
+    return scale
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="timeprobe", description="Measure one session at a time.")
     root.add_argument("--version", action="version", version=f"timeprobe {__version__}")
@@ -28,6 +36,17 @@ def parser() -> argparse.ArgumentParser:
         command = commands.add_parser(name)
         command.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
         if name == "start":
+            command.add_argument(
+                "--visible",
+                action="store_true",
+                help="show the timer immediately instead of its edge tab",
+            )
+            command.add_argument(
+                "--scale",
+                type=positive_scale,
+                default=1.0,
+                help="widget size multiplier (default: 1)",
+            )
             command.add_argument(
                 "--target", type=positive_duration, help="planned duration, e.g. 30m"
             )
@@ -69,7 +88,13 @@ def main(argv: list[str] | None = None) -> int:
         return int(error.code or 0)
     try:
         directory = store.state_dir()
-        result = engine.execute(args.command, directory, getattr(args, "target", None))
+        result = engine.execute(
+            args.command,
+            directory,
+            getattr(args, "target", None),
+            getattr(args, "scale", 1.0),
+            getattr(args, "visible", False),
+        )
         if args.json:
             print(json.dumps({"ok": True, **result}))
         else:
