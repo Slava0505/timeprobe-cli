@@ -1,8 +1,64 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
-from timeprobe.overlay import center_ink, display_time
+from timeprobe.overlay import (
+    center_ink,
+    display_time,
+    pause_coverage,
+    play_coverage,
+    triangle_coverage,
+)
+
+
+@pytest.mark.parametrize("scale", [1, 1.5, 2, 8])
+def test_play_triangle_has_smooth_edges_and_preserves_area(scale):
+    width, height = round(124 * scale), round(48 * scale)
+    values = []
+    for y in range(height):
+        for x in range(width):
+            coverage = play_coverage(x, y, width, height, scale)
+            assert 0 <= coverage <= 1
+            assert coverage == pytest.approx(play_coverage(x, height - 1 - y, width, height, scale))
+            values.append(coverage)
+    assert any(0 < value < 1 for value in values)
+    assert max(values) == 1
+    assert sum(values) == pytest.approx(11 * (11 * 0.72) * (scale * 1.4) ** 2, rel=0.03)
+
+
+@pytest.mark.parametrize("scale", [1, 1.5, 2, 8])
+def test_selected_pause_bar_dimensions_and_symmetry(scale):
+    width, height = round(124 * scale), round(48 * scale)
+    values = []
+    for y in range(height):
+        for x in range(width):
+            coverage = pause_coverage(x, y, width, height, scale)
+            assert 0 <= coverage <= 1
+            assert coverage == pytest.approx(pause_coverage(width - 1 - x, y, width, height, scale))
+            values.append(coverage)
+    assert sum(values) == pytest.approx(2 * 6.5 * 21.5 * scale**2, rel=0.02)
+
+
+@pytest.mark.parametrize("scale", [1, 1.5, 2, 8])
+def test_triangle_has_smooth_symmetric_edges_and_preserves_area(scale):
+    width, height = round(24 * scale), round(48 * scale)
+    values = []
+    for y in range(height):
+        for x in range(width):
+            coverage = triangle_coverage(x, y, scale, True)
+            assert 0 <= coverage <= 1
+            assert coverage == pytest.approx(triangle_coverage(x, height - 1 - y, scale, True))
+            assert coverage == pytest.approx(triangle_coverage(width - 1 - x, y, scale, False))
+            values.append(coverage)
+    assert any(0 < value < 1 for value in values)
+    assert max(values) == 1
+    size = scale * 1.6
+    area = 14 * 30 / 2 * size**2
+    semiperimeter = (math.hypot(14, 15) + 15) * size
+    rounded_loss = (2.5 * scale) ** 2 * (semiperimeter**2 / area - math.pi)
+    assert sum(values) == pytest.approx(area - rounded_loss, rel=0.02)
 
 
 @pytest.mark.parametrize(
